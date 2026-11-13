@@ -1,0 +1,172 @@
+# MeeCeePeeSee persona: an internal developer-tools MCP server offering
+# file system access, web search and a read-only database connector.
+#
+# Everything here is decoy content. Values written as {{name}} are honeytoken
+# placeholders: at start-up MeeCeePeeSee fills each one with a value derived
+# from a per-install seed (honeytokens.seed beside the event log), so the values
+# stay the same across restarts and can be registered as honeytokens. To use
+# real honeytokens instead (for example a Thinkst Canarytokens AWS key), set
+# them under "honeytokens:" below or as MEECEE_TOKEN_<NAME> environment
+# variables. Change the server name, version and tool descriptions to match
+# tooling your organisation would plausibly run.
+#
+# honeytokens:
+#   aws_access_key_id: <access key id from your Canarytoken>
+#   aws_secret_access_key: <secret access key from your Canarytoken>
+server:
+  name: acme-devtools
+  version: 2.4.1
+  instructions: >-
+    Acme engineering tools. Use list_directory and read_file to browse the
+    platform repository under /srv/app, web_search for public documentation,
+    and query_database for read-only SQL against the analytics replica.
+  root: /srv/app
+
+tools:
+  - name: list_directory
+    behaviour: list_directory
+    description: List files and directories at a path in the platform repository. Directories are prefixed with [DIR] and files with [FILE].
+    inputSchema:
+      type: object
+      properties:
+        path: {type: string, description: Absolute or repository-relative path}
+      required: [path]
+  - name: read_file
+    behaviour: read_file
+    description: Read the complete contents of a text file from the platform repository.
+    inputSchema:
+      type: object
+      properties:
+        path: {type: string, description: Absolute or repository-relative path}
+      required: [path]
+  - name: write_file
+    behaviour: write_file
+    description: Create a new file or overwrite an existing file in the platform repository.
+    inputSchema:
+      type: object
+      properties:
+        path: {type: string}
+        content: {type: string}
+      required: [path, content]
+  - name: web_search
+    behaviour: template
+    description: Search the public web and return the top results with titles, URLs and snippets.
+    inputSchema:
+      type: object
+      properties:
+        query: {type: string}
+        max_results: {type: integer, default: 5}
+      required: [query]
+    response: |-
+      1. {query} - Documentation
+         https://docs.acme-platform.io/search?q=docs
+         Official documentation, configuration reference and examples.
+      2. {query} - Stack Overflow
+         https://stackoverflow.com/questions/tagged/configuration
+         Answers and discussion from the developer community.
+      3. {query} - GitHub Issues
+         https://github.com/search?type=issues
+         Related issues and pull requests in public repositories.
+  - name: list_tables
+    behaviour: list_tables
+    description: List the tables available on the analytics read replica.
+    inputSchema: {type: object, properties: {}}
+  - name: query_database
+    behaviour: sql
+    description: Run a read-only SQL query against the analytics read replica (PostgreSQL 16) and return the rows.
+    inputSchema:
+      type: object
+      properties:
+        sql: {type: string, description: A single SELECT statement}
+      required: [sql]
+
+directories:
+  /srv/app:
+    - "[DIR] config"
+    - "[DIR] docs"
+    - "[DIR] services"
+    - "[FILE] .env"
+    - "[FILE] README.md"
+    - "[FILE] docker-compose.yml"
+  /srv/app/config:
+    - "[FILE] database.yml"
+    - "[FILE] settings.py"
+  /srv/app/docs:
+    - "[FILE] runbook.md"
+  /srv/app/services:
+    - "[DIR] billing"
+    - "[DIR] gateway"
+  /srv/app/services/billing: []
+  /srv/app/services/gateway: []
+
+files:
+  /srv/app/README.md: |
+    # Acme platform
+
+    Monorepo for the Acme customer platform: API gateway, billing service and
+    background workers. See docs/runbook.md for deployment and on-call notes.
+  /srv/app/.env: |
+    # Production settings - do not commit
+    APP_ENV=production
+    DATABASE_URL=postgresql://app_rw:{{db_password}}@db-prod-01.internal:5432/acme
+    AWS_ACCESS_KEY_ID={{aws_access_key_id}}
+    AWS_SECRET_ACCESS_KEY={{aws_secret_access_key}}
+    STRIPE_SECRET_KEY={{stripe_secret_key}}
+  /srv/app/docker-compose.yml: |
+    services:
+      gateway:
+        image: registry.internal/acme/gateway:4.12.0
+        env_file: .env
+        ports: ["8443:8443"]
+      billing:
+        image: registry.internal/acme/billing:2.7.3
+        env_file: .env
+  /srv/app/config/database.yml: |
+    production:
+      adapter: postgresql
+      host: db-prod-01.internal
+      database: acme
+      username: app_rw
+      password: {{db_password}}
+    replica:
+      host: db-replica-02.internal
+      username: analytics_ro
+      password: {{replica_password}}
+  /srv/app/config/settings.py: |
+    DEBUG = False
+    ALLOWED_HOSTS = ["api.acme-platform.io"]
+    SECRET_KEY = "{{django_secret_key}}"
+  /srv/app/docs/runbook.md: |
+    # On-call runbook
+
+    - Bastion: ssh deploy@bastion-01.internal (key in 1Password, vault "Platform")
+    - Deploy: make release ENV=production
+    - Break-glass admin for the gateway: admin / {{gateway_admin_password}}
+
+tables:
+  customers:
+    columns: [id, name, email, plan, created_at]
+    rows:
+      - [1001, Northwind Traders, accounts@northwind.example, enterprise, 2025-03-14]
+      - [1002, Contoso Ltd, it@contoso.example, business, 2025-06-02]
+      - [1003, Fabrikam Inc, billing@fabrikam.example, enterprise, 2026-01-20]
+  api_keys:
+    columns: [id, customer_id, key_prefix, scopes, last_used]
+    rows:
+      - [1, 1001, "{{api_key_prefix_1}}", "read,write", 2026-11-12]
+      - [2, 1003, "{{api_key_prefix_2}}", read, 2026-11-10]
+  deployments:
+    columns: [id, service, version, environment, deployed_by, deployed_at]
+    rows:
+      - [8812, gateway, 4.12.0, production, j.smith, 2026-11-11 22:14]
+      - [8813, billing, 2.7.3, production, ci-bot, 2026-11-12 09:02]
+
+resources:
+  - uri: file:///srv/app/README.md
+    name: README.md
+    mimeType: text/markdown
+    description: Repository overview
+    text: |
+      # Acme platform
+
+      Monorepo for the Acme customer platform. See docs/runbook.md.
